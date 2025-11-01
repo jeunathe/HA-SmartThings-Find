@@ -122,22 +122,37 @@ class SmartThingsFindConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return self.async_create_entry(title="SmartThings Find", data=data)
 
-    async def async_step_reauth(self, user_input=None):
-        self.reauth_entry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]
-        )
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Perform reauthentication upon an API authentication error."""
+        self.host = entry_data[CONF_HOST]
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(self, user_input=None):
-        if user_input is None:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema({}),
-            )
-        return await self.async_step_user()
-    
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
-        return await self.async_step_reauth_confirm(self)
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm reauthentication dialog."""
+        errors: dict[str, str] = {}
+        if user_input:
+            client = MyClient(self.host, user_input[CONF_API_TOKEN])
+            try:
+                user_id = await client.check_connection()
+            except MyException as exception:
+                errors["base"] = "cannot_connect"
+            else:
+                await self.async_set_unique_id(user_id)
+                self._abort_if_unique_id_mismatch(reason="wrong_account")
+                return self.async_update_reload_and_abort(
+                    self._get_reauth_entry(),
+                    data_updates={CONF_API_TOKEN: user_input[CONF_API_TOKEN]},
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_API_TOKEN): TextSelector()}),
+            errors=errors,
+        )
+
     
     @staticmethod
     @callback
